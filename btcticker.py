@@ -86,13 +86,21 @@ def getgecko(url):
         geckojson={}
     return geckojson, connectfail
 
+def convertkraken(whichcoin,fiat):
+    if (whichcoin == "bitcoin"):
+      krakenpair = "BTC" + fiat.upper()
+    else:
+      krakenpair = whichcoin[:3] + fiat.upper()
+
+    return krakenpair
+
 def getData(config,other):
     """
     The function to grab the data (TO DO: need to test properly)
     """
     sleep_time = 10
     num_retries = 5
-    whichcoin,krakenpair,fiat=configtocoinandfiat(config)
+    whichcoin,fiat=configtocoinandfiat(config)
     logging.info("Getting Data")
     days_ago=int(config['ticker']['sparklinedays'])   
     endtime = int(time.time())
@@ -141,6 +149,7 @@ def getData(config,other):
                 else:
                     other['ATH']=False
         elif config['ticker']['exchange']=='kraken':
+            krakenpair = convertkraken(whichcoin,fiat)
             geckourl="https://api.kraken.com/0/public/Ticker?pair="+krakenpair;
             logging.info(geckourl)
             rawlivecoin , connectfail = getgecko(geckourl)
@@ -148,7 +157,8 @@ def getData(config,other):
                 pass
             else:
                 logging.info(rawlivecoin['result'])
-                liveprice = rawlivecoin['result'][krakenpair]
+                first_key = list(rawlivecoin['result'].keys())[0]
+                liveprice = rawlivecoin['result'][first_key]
                 pricenow= float(liveprice['c'][0])
                 alltimehigh = 1000000.0
                 config['display']['showrank']=False
@@ -239,7 +249,7 @@ def updateDisplay(config,pricestack,other):
     originalcoin=originalconfig['ticker']['currency']
     originalcoin_list = originalcoin.split(",")
     originalcoin_list = [x.strip(' ') for x in originalcoin_list]
-    whichcoin,krakenpair,fiat=configtocoinandfiat(config)
+    whichcoin,fiat=configtocoinandfiat(config)
     days_ago=int(config['ticker']['sparklinedays'])   
     symbolstring=currency.symbol(fiat.upper())
     if fiat=="jpy" or fiat=="cny":
@@ -394,12 +404,10 @@ def fullupdate(config,lastcoinfetch):
 
 def configtocoinandfiat(config):
     crypto_list = currencystringtolist(config['ticker']['currency'])
-    kraken_list = currencystringtolist(config['ticker']['krakenpairs'])
     fiat_list=currencystringtolist(config['ticker']['fiatcurrency'])
     currency=crypto_list[0]
-    krakenpair=kraken_list[0]
     fiat=fiat_list[0]
-    return currency, krakenpair, fiat
+    return currency, fiat
 
 def gettrending(config):
     print("ADD TRENDING")
@@ -437,9 +445,9 @@ def main(loglevel=logging.WARNING):
 #       Time of start
         lastcoinfetch = time.time()
 #       Quick Sanity check on update frequency, waveshare says no faster than 180 seconds
-        if float(config['ticker']['updatefrequency'])<180:
-            logging.info("Throttling update frequency to 180 seconds")  
-            updatefrequency=180.0
+        if float(config['ticker']['updatefrequency'])<30:
+            logging.info("Throttling update frequency to 30 seconds")
+            updatefrequency=30.0
         else:
             updatefrequency=float(config['ticker']['updatefrequency'])
         while internet() ==False:
