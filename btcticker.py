@@ -14,7 +14,6 @@ import urllib, json
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
-import numpy as np
 import yaml 
 import socket
 import textwrap
@@ -23,12 +22,11 @@ picdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'images')
 fontdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'fonts/googlefonts')
 configfile = os.path.join(os.path.dirname(os.path.realpath(__file__)),'config.yaml')
 font_date = ImageFont.truetype(os.path.join(fontdir,'PixelSplitter-Bold.ttf'),11)
+headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
 
 def internet(hostname="google.com"):
     """
-    Host: 8.8.8.8 (google-public-dns-a.google.com)
-    OpenPort: 53/tcp
-    Service: domain (DNS/TCP)
+    Host: google.com
     """
     try:
         # see if we can resolve the host name -- tells us if there is
@@ -41,7 +39,7 @@ def internet(hostname="google.com"):
         return True
     except:
         logging.info("Google says No")
-        pass
+        time.sleep(1)
     return False
 
 def human_format(num):
@@ -78,103 +76,139 @@ def writewrappedlines(img,text,fontsize=16,y_text=20,height=15, width=25,fontstr
         numoflines+=1
     return img
 
+def getgecko(url):
+    try:
+        geckojson=requests.get(url, headers=headers).json()
+        connectfail=False
+    except requests.exceptions.RequestException as e:
+        logging.info("Issue with CoinGecko")
+        connectfail=True
+        geckojson={}
+    return geckojson, connectfail
+
 def getData(config,other):
     """
-    The function to update the ePaper display. There are two versions of the layout. One for portrait aspect ratio, one for landscape.
+    The function to grab the data (TO DO: need to test properly)
     """
-    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
+    sleep_time = 10
+    num_retries = 5
     whichcoin,krakenpair,fiat=configtocoinandfiat(config)
     logging.info("Getting Data")
     days_ago=int(config['ticker']['sparklinedays'])   
     endtime = int(time.time())
     starttime = endtime - 60*60*24*days_ago
     starttimeseconds = starttime
-    endtimeseconds = endtime     
-    # Get the price
-    
+    endtimeseconds = endtime 
     geckourlhistorical = "https://api.coingecko.com/api/v3/coins/"+whichcoin+"/market_chart/range?vs_currency="+fiat+"&from="+str(starttimeseconds)+"&to="+str(endtimeseconds)
     logging.info(geckourlhistorical)
-    rawtimeseries = requests.get(geckourlhistorical, headers=headers).json()
-    logging.info("Got price for the last "+str(days_ago)+" days from CoinGecko")
-    timeseriesarray = rawtimeseries['prices']
-    timeseriesstack = []
-    length=len (timeseriesarray)
-    i=0
-    while i < length:
-        timeseriesstack.append(float (timeseriesarray[i][1]))
-        i+=1
-    # A little pause before hiting the api again
-    time.sleep(1)
-    
-    if config['ticker']['exchange']=='default':
-        geckourl = "https://api.coingecko.com/api/v3/coins/markets?vs_currency="+fiat+"&ids="+whichcoin
-        logging.info(geckourl)
-        rawlivecoin = requests.get(geckourl, headers=headers).json()
-        logging.info(rawlivecoin[0])
-        liveprice = rawlivecoin[0]
-        pricenow= float(liveprice['current_price'])
-        alltimehigh = float(liveprice['ath'])
-        other['market_cap_rank'] = int(liveprice['market_cap_rank'])
-        other['volume'] = float(liveprice['total_volume'])
-    elif config['ticker']['exchange']=='kraken':
-        geckourl="https://api.kraken.com/0/public/Ticker?pair="+krakenpair;
-        logging.info(geckourl)
-        rawlivecoin = requests.get(geckourl, headers=headers).json()
-        logging.info(rawlivecoin['result'])
-        liveprice = rawlivecoin['result'][krakenpair]
-        pricenow= float(liveprice['c'][0])
-        alltimehigh = 1000000.0   # For non-default the ATH does not show in the API, so show it when price reaches *pinky in mouth* ONE MILLION DOLLARS
-        other['market_cap_rank'] = 0 # For non-default the Rank does not show in the API, so leave blank
-        other['volume'] = float(liveprice['v'][1])*pricenow
-    else:
-        geckourl= "https://api.coingecko.com/api/v3/exchanges/"+config['ticker']['exchange']+"/tickers?coin_ids="+whichcoin+"&include_exchange_logo=false"
-        logging.info(geckourl)
-        rawlivecoin = requests.get(geckourl, headers=headers).json()
-        theindex=-1
-        upperfiat=fiat.upper()
-        for i in range (len(rawlivecoin['tickers'])):
-            target=rawlivecoin['tickers'][i]['target']
-            if target==upperfiat:
-                theindex=i
-                logging.info("Found "+upperfiat+" at index " + str(i))
-#       if UPPERFIAT is not listed as a target theindex==-1 and it is time to go to sleep
-        if  theindex==-1:
-            logging.info("The exchange is not listing in "+upperfiat+". Misconfigured - shutting down script")
-            sys.exit()
-        liveprice= rawlivecoin['tickers'][theindex]
-        pricenow= float(liveprice['last'])
-        other['market_cap_rank'] = 0 # For non-default the Rank does not show in the API, so leave blank
-        other['volume'] = float(liveprice['converted_volume']['usd'])
-        alltimehigh = 1000000.0   # For non-default the ATH does not show in the API, so show it when price reaches *pinky in mouth* ONE MILLION DOLLARS
-    logging.info("Got Live Data From CoinGecko")
-    
-    timeseriesstack.append(pricenow)
-    if pricenow>alltimehigh:
-        other['ATH']=True
-    else:
-        other['ATH']=False
+    for x in range(0, num_retries):   
+        rawtimeseries, connectfail=  getgecko(geckourlhistorical)
+        if connectfail== True:
+            pass
+        else:
+            logging.info("Got price for the last "+str(days_ago)+" days from CoinGecko")
+            timeseriesarray = rawtimeseries['prices']
+            timeseriesstack = []
+            length=len (timeseriesarray)
+            i=0
+            while i < length:
+                timeseriesstack.append(float (timeseriesarray[i][1]))
+                i+=1
+            # A little pause before hiting the api again
+            time.sleep(1)          
+            # Get the price 
+        if config['ticker']['exchange']=='default':
+            geckourl = "https://api.coingecko.com/api/v3/coins/markets?vs_currency="+fiat+"&ids="+whichcoin
+            logging.info(geckourl)
+            rawlivecoin , connectfail = getgecko(geckourl)
+            if connectfail==True:
+                pass
+            else:
+                logging.info(rawlivecoin[0])   
+                liveprice = rawlivecoin[0]
+                pricenow= float(liveprice['current_price'])
+                alltimehigh = float(liveprice['ath'])
+                # Quick workaround for error being thrown for obscure coins. TO DO: Examine further
+                try:
+                    other['market_cap_rank'] = int(liveprice['market_cap_rank'])
+                except:
+                    config['display']['showrank']=False
+                    other['market_cap_rank'] = 0
+                other['volume'] = float(liveprice['total_volume'])
+                timeseriesstack.append(pricenow)
+                if pricenow>alltimehigh:
+                    other['ATH']=True
+                else:
+                    other['ATH']=False
+        elif config['ticker']['exchange']=='kraken':
+            geckourl="https://api.kraken.com/0/public/Ticker?pair="+krakenpair;
+            logging.info(geckourl)
+            rawlivecoin , connectfail = getgecko(geckourl)
+            if connectfail==True:
+                pass
+            else:
+                logging.info(rawlivecoin['result'])
+                liveprice = rawlivecoin['result'][krakenpair]
+                pricenow= float(liveprice['c'][0])
+                alltimehigh = 1000000.0
+                config['display']['showrank']=False
+                other['market_cap_rank'] = 0
+                other['volume'] = float(liveprice['v'][1])*pricenow
+                timeseriesstack.append(pricenow)
+                other['ATH']=False
+        else:
+            geckourl= "https://api.coingecko.com/api/v3/exchanges/"+config['ticker']['exchange']+"/tickers?coin_ids="+whichcoin+"&include_exchange_logo=false"
+            logging.info(geckourl)
+            rawlivecoin, connectfail = getgecko(geckourl)
+            if connectfail==True:
+                pass
+            else:
+                theindex=-1
+                upperfiat=fiat.upper()
+                for i in range (len(rawlivecoin['tickers'])):
+                    target=rawlivecoin['tickers'][i]['target']
+                    if target==upperfiat:
+                        theindex=i
+                        logging.info("Found "+upperfiat+" at index " + str(i))
+        #       if UPPERFIAT is not listed as a target theindex==-1 and it is time to go to sleep
+                if  theindex==-1:
+                    logging.info("The exchange is not listing in "+upperfiat+". Misconfigured - shutting down script")
+                    sys.exit()
+                liveprice= rawlivecoin['tickers'][theindex]
+                pricenow= float(liveprice['last'])
+                other['market_cap_rank'] = 0 # For non-default the Rank does not show in the API, so leave blank
+                other['volume'] = float(liveprice['converted_volume']['usd'])
+                alltimehigh = 1000000.0   # For non-default the ATH does not show in the API, so show it when price reaches *pinky in mouth* ONE MILLION DOLLARS
+                logging.info("Got Live Data From CoinGecko")
+                timeseriesstack.append(pricenow)
+                if pricenow>alltimehigh:
+                    other['ATH']=True
+                else:
+                    other['ATH']=False
+        if connectfail==True:
+            message="Trying again in ", sleep_time, " seconds"
+            logging.info(message)
+            time.sleep(sleep_time)  # wait before trying to fetch the data again
+            sleep_time *= 2  # exponential backoff
+        else:
+            break
     return timeseriesstack, other
 
 def beanaproblem(message):
 #   A visual cue that the wheels have fallen off
-#   Also, for client side errors, force a reboot
     thebean = Image.open(os.path.join(picdir,'thebean.bmp'))
     image = Image.new('L', (264, 176), 255)    # 255: clear the image with white
     draw = ImageDraw.Draw(image)
     image.paste(thebean, (60,45))
-    draw.text((95,15),str(time.strftime("%H:%M %a %d %b %Y")),font =font_date,fill = 0)
-    writewrappedlines(image, "Issue:"+message)
-#    draw.text((15,150),message, font=font_date,fill = 0)
-    thebean.close()
-#   Reload last good config.yaml
-    with open(configfile) as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
+    draw.text((95,15),str(time.strftime("%-H:%M %p, %-d %b %Y")),font =font_date,fill = 0)
+    writewrappedlines(image, "Issue: "+message)
     return image
 
 def makeSpark(pricestack):
     # Draw and save the sparkline that represents historical data
-    # Subtract the mean from the sparkline to make the mean appear on the plot (it's really the x axis)    
-    x = pricestack-np.mean(pricestack)
+    # Subtract the mean from the sparkline to make the mean appear on the plot (it's really the x axis)
+    themean= sum(pricestack)/float(len(pricestack))
+    x = [xx - themean for xx in pricestack] 
     fig, ax = plt.subplots(1,1,figsize=(10,3))
     plt.plot(x, color='k', linewidth=6)
     plt.plot(len(x)-1, x[-1], color='r', marker='o')
@@ -191,6 +225,8 @@ def makeSpark(pricestack):
     imgspk.save(file_out) 
     plt.clf() # Close plot to prevent memory error
     ax.cla() # Close axis to prevent memory error
+    imgspk.close()
+    return
 
 def updateDisplay(config,pricestack,other):
     """   
@@ -198,7 +234,6 @@ def updateDisplay(config,pricestack,other):
     if config is re-written following adustment we could avoid passing the last two arguments as
     they will just be the first two items of their string in config
     """
-    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
     with open(configfile) as f:
         originalconfig = yaml.load(f, Loader=yaml.FullLoader)
     originalcoin=originalconfig['ticker']['currency']
@@ -210,7 +245,10 @@ def updateDisplay(config,pricestack,other):
     if fiat=="jpy" or fiat=="cny":
         symbolstring="¥"
     pricenow = pricestack[-1]
-    currencythumbnail= 'currency/'+whichcoin+'.bmp'
+    if config['display']['inverted'] == True:
+        currencythumbnail= 'currency/'+whichcoin+'INV.bmp'
+    else:
+        currencythumbnail= 'currency/'+whichcoin+'.bmp'
     tokenfilename = os.path.join(picdir,currencythumbnail)
     sparkbitmap = Image.open(os.path.join(picdir,'spark.bmp'))
     ATHbitmap= Image.open(os.path.join(picdir,'ATH.bmp'))
@@ -225,6 +263,12 @@ def updateDisplay(config,pricestack,other):
         tokenimage = Image.open(requests.get(rawimage['image']['large'], headers = headers, stream=True).raw).convert("RGBA")
         resize = 100,100
         tokenimage.thumbnail(resize, Image.ANTIALIAS)
+        # If inverted is true, invert the token symbol before placing if on the white BG so that it is uninverted at the end - this will make things more 
+        # legible on a black display
+        if config['display']['inverted'] == True:
+            #PIL doesnt like to invert binary images, so convert to RGB, invert and then convert back to RGBA
+            tokenimage = ImageOps.invert( tokenimage.convert('RGB') )
+            tokenimage = tokenimage.convert('RGBA')
         new_image = Image.new("RGBA", (120,120), "WHITE") # Create a white rgba background with a 10 pixel border
         new_image.paste(tokenimage, (10, 10), tokenimage)   
         tokenimage=new_image
@@ -263,14 +307,13 @@ def updateDisplay(config,pricestack,other):
         writewrappedlines(image, symbolstring+pricenowstring,50,55,8,10,"Roboto-Medium" )
         image.paste(sparkbitmap,(80,40))
         image.paste(tokenimage, (0,10))
-                          
-        if 'showrank' in config['display'] and config['display']['showrank'] and other['market_cap_rank'] > 0:
+        # Don't show rank for #1 coin, #1 doesn't need to show off                  
+        if 'showrank' in config['display'] and config['display']['showrank'] and other['market_cap_rank'] > 1:
             draw.text((10,105),"Rank: " + str("%d" % other['market_cap_rank']),font =font_date,fill = 0)
-        
         if (config['display']['trendingmode']==True) and not (str(whichcoin) in originalcoin_list):
-            writewrappedlines(image, whichcoin,11,24,8,25,"PixelSplitter-Bold" )
+            draw.text((95,28),whichcoin,font =font_date,fill = 0)
 #       draw.text((5,110),"In retrospect, it was inevitable",font =font_date,fill = 0)
-        draw.text((90,15),str(time.strftime("%-I:%M %p, %d %b %Y")),font =font_date,fill = 0)
+        draw.text((95,15),str(time.strftime("%-I:%M %p, %d %b %Y")),font =font_date,fill = 0)
         if config['display']['orientation'] == 270 :
             image=image.rotate(180, expand=True)
 #       This is a hack to deal with the mirroring that goes on in older waveshare libraries Uncomment line below if needed
@@ -338,7 +381,6 @@ def fullupdate(config,lastcoinfetch):
         makeSpark(pricestack)
         # update display
         image=updateDisplay(config, pricestack, other)
-#          image=beanaproblem("Uncomment me to check how well the word wrapping works on error messages")
         display_image(image)
         lastgrab=time.time()
         time.sleep(0.2)
@@ -361,7 +403,6 @@ def configtocoinandfiat(config):
 
 def gettrending(config):
     print("ADD TRENDING")
-    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
     coinlist=config['ticker']['currency']
     url="https://api.coingecko.com/api/v3/search/trending"
 #   Cycle must be true if trending mode is on
@@ -373,12 +414,12 @@ def gettrending(config):
     config['ticker']['currency']=coinlist
     return config
 
-def main():
-    loglevel = logging.WARNING
-    # To debug, uncomment this line
-    #loglevel = logging.DEBUG
+def main(loglevel=logging.WARNING):    
+    # To debug, uncomment this line (default is warning)
+    loglevel = logging.DEBUG
     
     logging.basicConfig(level=loglevel)
+    
     try:
         logging.info("epd2in7 BTC Frame")
 #       Get the configuration from config.yaml
@@ -386,55 +427,65 @@ def main():
             config = yaml.load(f, Loader=yaml.FullLoader)
         logging.info(config)
         config['display']['orientation']=int(config['display']['orientation'])
+        staticcoins=config['ticker']['currency']
 #       Get the buttons for 2.7in EPD set up
         thekeys=initkeys()
 #       Note how many coins in original config file
         howmanycoins=len(config['ticker']['currency'].split(","))
-        print("HOWMANY="+str(howmanycoins))
 #       Note that there has been no data pull yet
         datapulled=False 
 #       Time of start
         lastcoinfetch = time.time()
+#       Quick Sanity check on update frequency, waveshare says no faster than 180 seconds
+        if float(config['ticker']['updatefrequency'])<180:
+            logging.info("Throttling update frequency to 180 seconds")  
+            updatefrequency=180.0
+        else:
+            updatefrequency=float(config['ticker']['updatefrequency'])
+        while internet() ==False:
+            logging.info("Waiting for internet")
         while True:
 #           Poll Keystates
             key1state = GPIO.input(thekeys[0])
             key2state = GPIO.input(thekeys[1])
             key3state = GPIO.input(thekeys[2])
             key4state = GPIO.input(thekeys[3])
-#           If there is an internet connection, respond to the keypresses
-            if internet():                
-                if key1state == False:
-                    logging.info('Cycle currencies')
+                
+            if key1state == False:
+                logging.info('Cycle currencies')
+                crypto_list = currencycycle(config['ticker']['currency'])
+                config['ticker']['currency']=",".join(crypto_list)
+                lastcoinfetch=fullupdate(config, lastcoinfetch)
+                configwrite(config) 
+            if key2state == False:
+                logging.info('Rotate - 90')
+                config['display']['orientation'] = (config['display']['orientation']+90) % 360
+                lastcoinfetch=fullupdate(config,lastcoinfetch)
+                configwrite(config)
+            if key3state == False:
+                logging.info('Invert Display')
+                config['display']['inverted'] = not config['display']['inverted']
+                lastcoinfetch=fullupdate(config,lastcoinfetch)
+                configwrite(config)
+            if key4state == False:
+                logging.info('Cycle fiat')
+                fiat_list = currencycycle(config['ticker']['fiatcurrency'])
+                config['ticker']['fiatcurrency']=",".join(fiat_list)
+                lastcoinfetch=fullupdate(config,lastcoinfetch)
+                configwrite(config)
+            if config['display']['trendingmode']==True:
+                # The hard-coded 7 is for the number of trending coins to show. Consider revising
+                if (time.time() - lastcoinfetch > (7+howmanycoins)*updatefrequency) or (datapulled==False):
+                    # Reset coin list to static (non trending coins from config file)
+                    config['ticker']['currency']=staticcoins
+                    config=gettrending(config)
+            if (time.time() - lastcoinfetch > updatefrequency) or (datapulled==False):
+                if config['display']['cycle']==True and (datapulled==True):
                     crypto_list = currencycycle(config['ticker']['currency'])
                     config['ticker']['currency']=",".join(crypto_list)
-                    lastcoinfetch=fullupdate(config, lastcoinfetch)
-                    configwrite(config) 
-                if key2state == False:
-                    logging.info('Rotate - 90')
-                    config['display']['orientation'] = (config['display']['orientation']+90) % 360
-                    lastcoinfetch=fullupdate(config,lastcoinfetch)
-                    configwrite(config)
-                if key3state == False:
-                    logging.info('Invert Display')
-                    config['display']['inverted'] = not config['display']['inverted']
-                    lastcoinfetch=fullupdate(config,lastcoinfetch)
-                    configwrite(config)
-                if key4state == False:
-                    logging.info('Cycle fiat')
-                    fiat_list = currencycycle(config['ticker']['fiatcurrency'])
-                    config['ticker']['fiatcurrency']=",".join(fiat_list)
-                    lastcoinfetch=fullupdate(config,lastcoinfetch)
-                    configwrite(config)
-                if (time.time() - lastcoinfetch > (7+howmanycoins)*float(config['ticker']['updatefrequency'])) or (datapulled==False):
-                        if config['display']['trendingmode']==True:
-                            config=gettrending(config)
-                if (time.time() - lastcoinfetch > float(config['ticker']['updatefrequency'])) or (datapulled==False):
-                    if config['display']['cycle']==True:
-                        crypto_list = currencycycle(config['ticker']['currency'])
-                        config['ticker']['currency']=",".join(crypto_list)
-                        # configwrite(config)
-                    lastcoinfetch=fullupdate(config,lastcoinfetch)
-                    datapulled = True
+                    # configwrite(config)
+                lastcoinfetch=fullupdate(config,lastcoinfetch)
+                datapulled = True
     except IOError as e:
         logging.info(e)
         image=beanaproblem(str(e)+" Line: "+str(e.__traceback__.tb_lineno))
@@ -442,7 +493,7 @@ def main():
     except Exception as e:
         logging.info(e)
         image=beanaproblem(str(e)+" Line: "+str(e.__traceback__.tb_lineno))
-        display_image(image)
+        display_image(image)  
     except KeyboardInterrupt:    
         logging.info("ctrl + c:")
         image=beanaproblem("Keyboard Interrupt")
