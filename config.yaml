@@ -11,4 +11,3 @@ ticker:
   fiatcurrency: usd,eur,gbp
   sparklinedays: 1 
   updatefrequency: 300
-

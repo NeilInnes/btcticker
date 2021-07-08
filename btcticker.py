@@ -86,6 +86,16 @@ def getgecko(url):
         geckojson={}
     return geckojson, connectfail
 
+def convertkraken(whichcoin,fiat):
+    # krakenpairs is only required if using kraken as the exchange, this comma seperated list must match the currency and fiatcurrency list
+    # A full list of support Kraken pairs can be found here: https://support.kraken.com/hc/en-us/articles/360000920306-Ticker-pairs
+    if (whichcoin == "bitcoin"):
+      krakenpair = "BTC" + fiat.upper()
+    else:
+      krakenpair = whichcoin[:3] + fiat.upper()
+
+    return krakenpair
+
 def getData(config,other):
     """
     The function to grab the data (TO DO: need to test properly)
@@ -140,6 +150,24 @@ def getData(config,other):
                     other['ATH']=True
                 else:
                     other['ATH']=False
+        elif config['ticker']['exchange']=='kraken':
+            krakenpair = convertkraken(whichcoin,fiat)
+            geckourl="https://api.kraken.com/0/public/Ticker?pair="+krakenpair;
+            logging.info(geckourl)
+            rawlivecoin , connectfail = getgecko(geckourl)
+            if connectfail==True:
+                pass
+            else:
+                logging.info(rawlivecoin['result'])
+                first_key = list(rawlivecoin['result'].keys())[0]
+                liveprice = rawlivecoin['result'][first_key]
+                pricenow= float(liveprice['c'][0])
+                alltimehigh = 1000000.0
+                config['display']['showrank']=False
+                other['market_cap_rank'] = 0
+                other['volume'] = float(liveprice['v'][1])*pricenow
+                timeseriesstack.append(pricenow)
+                other['ATH']=False
         else:
             geckourl= "https://api.coingecko.com/api/v3/exchanges/"+config['ticker']['exchange']+"/tickers?coin_ids="+whichcoin+"&include_exchange_logo=false"
             logging.info(geckourl)
@@ -419,9 +447,9 @@ def main(loglevel=logging.WARNING):
 #       Time of start
         lastcoinfetch = time.time()
 #       Quick Sanity check on update frequency, waveshare says no faster than 180 seconds
-        if float(config['ticker']['updatefrequency'])<180:
-            logging.info("Throttling update frequency to 180 seconds")  
-            updatefrequency=180.0
+        if float(config['ticker']['updatefrequency'])<30:
+            logging.info("Throttling update frequency to 30 seconds")
+            updatefrequency=30.0
         else:
             updatefrequency=float(config['ticker']['updatefrequency'])
         while internet() ==False:
