@@ -87,6 +87,8 @@ def getgecko(url):
     return geckojson, connectfail
 
 def convertkraken(whichcoin,fiat):
+    # krakenpairs is only required if using kraken as the exchange, this comma seperated list must match the currency and fiatcurrency list
+    # A full list of support Kraken pairs can be found here: https://support.kraken.com/hc/en-us/articles/360000920306-Ticker-pairs
     if (whichcoin == "bitcoin"):
       krakenpair = "BTC" + fiat.upper()
     else:
